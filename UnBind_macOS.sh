@@ -1,5 +1,7 @@
 #!/bin/bash
 
+SILENT_MODE="${SILENT_MODE:-false}"
+
 LOG_DIR="/var/log"
 LOG_FILE="$LOG_DIR/unbind_ad_conversion.log"
 SCRIPT_NAME="$(basename "$0")"
@@ -10,7 +12,12 @@ log() {
   shift
   local message="$*"
   local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-  echo "[$timestamp] [$level] $message" | tee -a "$LOG_FILE"
+
+  if [[ "$SILENT_MODE" != "true" ]]; then
+    echo "[$timestamp] [$level] $message" | tee -a "$LOG_FILE"
+  else
+    echo "[$timestamp] [$level] $message" >> "$LOG_FILE"
+  fi
 }
 
 log_error() {
