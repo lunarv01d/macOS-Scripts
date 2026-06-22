@@ -1,57 +1,84 @@
 #!/bin/bash
 
-loggedInUser=$(stat -f%Su /dev/console)
-
-if [[ "$loggedInUser" == "root" || -z "$loggedInUser" ]]; then
-
-echo "No user logged in."
-
-exit 1
-
+if [[ $(id -u) -ne 0 ]]; then
+  echo "This script must be run as root."
+  exit 1
 fi
 
-echo "Processing user: $loggedInUser"
+convert_mobile_account() {
+  local user="$1"
+  local userRecord="/Users/$user"
 
-if dscl . -read /Users/$loggedInUser OriginalNodeName >/dev/null 2>&1; then
+  echo "Processing mobile account: $user"
 
-echo "Mobile account detected."
+  attributes=(
+    OriginalNodeName
+    SMBPrimaryGroupSID
+    SMBGroupRID
+    SMBUserRID
+    SMBUserSID
+    cached_groups
+    cached_auth_policy
+    CopyTimestamp
+    AltSecurityIdentities
+  )
 
-attributes=(
+  for attribute in "${attributes[@]}"; do
+    if dscl . -read "/Users/$user" "$attribute" >/dev/null 2>&1; then
+      dscl . -delete "/Users/$user" "$attribute" 2>/dev/null
+      echo "  Removed $attribute"
+    fi
+  done
 
-OriginalNodeName
+  if dscl . -read "/Users/$user" AuthenticationAuthority >/dev/null 2>&1; then
+    dscl . -read "/Users/$user" AuthenticationAuthority | tail -n +2 | while IFS= read -r authValue; do
+      if [[ "$authValue" == *"Active Directory"* || "$authValue" == *"Kerberosv5"* || "$authValue" == *"LocalCachedUser"* ]]; then
+        dscl . -delete "/Users/$user" AuthenticationAuthority "$authValue" 2>/dev/null && echo "  Removed AuthenticationAuthority entry"
+      fi
+    done
+  fi
 
-SMBPrimaryGroupSID
+  dscl . -create "/Users/$user" NFSHomeDirectory "$userRecord" 2>/dev/null
+  dscl . -create "/Users/$user" PrimaryGroupID 20 2>/dev/null
 
-SMBGroupRID
+  if [[ -d "$userRecord" ]]; then
+    chown -R "$user":staff "$userRecord"
+    echo "  Reset ownership for home directory."
+  fi
 
-SMBUserRID
+  echo "  Converted $user to local account."
+}
 
-SMBUserSID
+mobileUsers=$(dscl . -list /Users OriginalNodeName 2>/dev/null | awk '{print $1}')
 
-cached_groups
-
-cached_auth_policy
-
-CopyTimestamp
-
-AltSecurityIdentities
-
-)
-
-for attribute in "${attributes[@]}"; do
-
-dscl . -delete /Users/$loggedInUser "$attribute" 2>/dev/null
-
-done
-
-chown -R "$loggedInUser":staff "/Users/$loggedInUser"
-
-echo "Successfully converted $loggedInUser to local account."
-
+if [[ -z "$mobileUsers" ]]; then
+  echo "No mobile accounts found."
 else
-
-echo "Account is already local."
-
+  while IFS= read -r user; do
+    if [[ -n "$user" ]]; then
+      convert_mobile_account "$user"
+    fi
+  done <<< "$mobileUsers"
 fi
+
+unbind_ad() {
+  echo "Checking for Active Directory binding..."
+  if /usr/sbin/dsconfigad -show >/dev/null 2>&1; then
+    echo "Active Directory binding detected. Removing AD binding..."
+    if /usr/sbin/dsconfigad -remove -force >/dev/null 2>&1; then
+      echo "Active Directory unbind complete."
+    elif /usr/sbin/dsconfigad -remove >/dev/null 2>&1; then
+      echo "Active Directory unbind complete."
+    else
+      echo "Failed to remove Active Directory binding."
+      /usr/sbin/dsconfigad -show
+      exit 1
+    fi
+  else
+    echo "No Active Directory binding found."
+  fi
+}
+
+unbind_ad
 
 exit 0
