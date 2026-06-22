@@ -1,4 +1,4 @@
-Celina Makinsi 6/22/2026 9:56 AM • #!/bin/bash
+#!/bin/bash
 
 loggedInUser=$(stat -f%Su /dev/console)
 
