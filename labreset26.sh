@@ -4,7 +4,7 @@
 # Jamf Parameters:
 #   4: Secure Token admin username
 #   5: Secure Token admin password
-#   6: Optional macOS installer version to download (major like 26, or full like 26.0)
+#   6: Optional full macOS installer version to download (for example: 26.0)
 
 set -e
 
@@ -14,7 +14,7 @@ TARGET_VERSION="$6"
 TARGET_INSTALLER_NAME="Install macOS Tahoe.app"
 VOLUME_NAME="Macintosh HD"
 LOG="/var/log/lisd-erase-install.log"
-SCRIPT_VERSION="2026-07-08-tahoe-version-resolution"
+SCRIPT_VERSION="2026-07-08-bootstrap-token-startosinstall"
 
 exec > >(tee -a "$LOG") 2>&1
 
@@ -54,39 +54,8 @@ if echo "$BOOTSTRAP_TOKEN_STATUS" | /usr/bin/grep -qi "Bootstrap Token escrowed 
 fi
 
 if [ -n "$TARGET_VERSION" ]; then
-    REQUESTED_VERSION="$TARGET_VERSION"
-    if [[ "$TARGET_VERSION" =~ ^[0-9]+$ ]]; then
-        echo "Jamf parameter 6 is a major version ($TARGET_VERSION); resolving the newest available $TARGET_VERSION.x full installer..."
-        FULL_INSTALLER_LIST=$(/usr/sbin/softwareupdate --list-full-installers 2>&1 || true)
-        echo "$FULL_INSTALLER_LIST"
-        RESOLVED_VERSION=$(echo "$FULL_INSTALLER_LIST" | /usr/bin/awk -v major="$TARGET_VERSION" '
-            /Version: / {
-                version=$0
-                sub(/^.*Version: /, "", version)
-                sub(/,.*$/, "", version)
-                if (version == major || index(version, major ".") == 1) {
-                    print version
-                    exit
-                }
-            }
-        ')
-
-        if [ -z "$RESOLVED_VERSION" ]; then
-            echo "ERROR: Could not find an available macOS $TARGET_VERSION full installer."
-            echo "Use a full version shown by softwareupdate --list-full-installers, or leave Jamf parameter 6 blank to fetch the newest available installer."
-            exit 1
-        fi
-
-        REQUESTED_VERSION="$RESOLVED_VERSION"
-        echo "Resolved macOS $TARGET_VERSION to full installer version $REQUESTED_VERSION."
-    fi
-
-    echo "Downloading macOS full installer version $REQUESTED_VERSION..."
-    if ! /usr/sbin/softwareupdate --fetch-full-installer --full-installer-version "$REQUESTED_VERSION"; then
-        echo "ERROR: softwareupdate could not fetch macOS full installer version $REQUESTED_VERSION."
-        echo "Run softwareupdate --list-full-installers on a target Mac and set Jamf parameter 6 to an exact listed Tahoe version."
-        exit 1
-    fi
+    echo "Downloading macOS full installer version $TARGET_VERSION..."
+    /usr/sbin/softwareupdate --fetch-full-installer --full-installer-version "$TARGET_VERSION"
 else
     echo "No target installer version supplied in Jamf parameter 6."
     echo "Downloading newest available macOS full installer; this policy will only continue if it resolves to $TARGET_INSTALLER_NAME."
@@ -130,84 +99,28 @@ fi
 echo "Checking Secure Token status..."
 /usr/sbin/sysadminctl -secureTokenStatus "$ADMIN_USER" 2>&1 || true
 
-if [ "$BOOTSTRAP_TOKEN_ESCROWED" = "true" ]; then
-    echo "Bootstrap Token is escrowed; startosinstall will use MDM authorization instead of stdin credentials."
-else
-    echo "Validating admin password before startosinstall..."
-    if ! /usr/bin/dscl /Local/Default -authonly "$ADMIN_USER" "$ADMIN_PASS"; then
-        echo "ERROR: Password validation failed for $ADMIN_USER."
-        echo "Apple Silicon erase installs require valid credentials for a Secure Token/volume-owner admin."
-        exit 1
-    fi
-
-    USER_GUID=$(/usr/bin/dscl . -read "/Users/$ADMIN_USER" GeneratedUID 2>/dev/null | /usr/bin/awk '{print $2}')
-    if [ -n "$USER_GUID" ]; then
-        echo "Checking APFS volume ownership for $ADMIN_USER ($USER_GUID)..."
-        VOLUME_OWNER_STATUS=$(/usr/sbin/diskutil apfs listUsers / 2>/dev/null | /usr/bin/awk -v guid="$USER_GUID" '
-            $0 ~ guid { in_user=1; owner="" }
-            in_user && /Volume Owner:/ { owner=$0 }
-            in_user && owner != "" { print owner; exit }
-        ')
-
-        if [ -z "$VOLUME_OWNER_STATUS" ]; then
-            echo "WARNING: Could not confirm APFS volume-owner status for $ADMIN_USER."
-            echo "startosinstall on Apple Silicon requires the supplied account to be a volume owner."
-        elif echo "$VOLUME_OWNER_STATUS" | /usr/bin/grep -qi "Yes"; then
-            echo "APFS volume-owner status: $VOLUME_OWNER_STATUS"
-        else
-            echo "ERROR: $ADMIN_USER is not an APFS volume owner: $VOLUME_OWNER_STATUS"
-            echo "Use the password for a volume-owner account, or issue the Jamf MDM EraseDevice command instead of startosinstall."
-            exit 1
-        fi
-    else
-        echo "WARNING: Could not read GeneratedUID for $ADMIN_USER; unable to verify APFS volume-owner status."
-    fi
-
+echo "Validating admin password before startosinstall..."
+if ! /usr/bin/dscl /Local/Default -authonly "$ADMIN_USER" "$ADMIN_PASS"; then
+    echo "ERROR: Password validation failed for $ADMIN_USER."
+    echo "Apple Silicon erase installs require valid credentials for a Secure Token/volume-owner admin."
+    exit 1
 fi
 
 echo "Starting erase install..."
 echo "This Mac will reboot and erase itself."
 
 set +e
-if [ "$BOOTSTRAP_TOKEN_ESCROWED" = "true" ]; then
-    "$STARTOSINSTALL" \
-        --eraseinstall \
-        --newvolumename "$VOLUME_NAME" \
-        --agreetolicense \
-        --forcequitapps \
-        --allowremoval \
-        --nointeraction
-    RESULT=$?
-else
-    printf '%s\n' "$ADMIN_PASS" | "$STARTOSINSTALL" \
-        --eraseinstall \
-        --newvolumename "$VOLUME_NAME" \
-        --agreetolicense \
-        --forcequitapps \
-        --allowremoval \
-        --nointeraction \
-        --user "$ADMIN_USER" \
-        --stdinpass
-    RESULT=$?
-fi
+printf '%s\n' "$ADMIN_PASS" | "$STARTOSINSTALL" \
+    --eraseinstall \
+    --newvolumename "$VOLUME_NAME" \
+    --agreetolicense \
+    --forcequitapps \
+    --allowremoval \
+    --nointeraction \
+    --user "$ADMIN_USER" \
+    --stdinpass
+RESULT=$?
 set -e
 
 echo "startosinstall exited with code: $RESULT"
-
-if [ "$RESULT" -ne 0 ]; then
-    echo "===== startosinstall diagnostics ====="
-    echo "Recent install.log entries:"
-    /usr/bin/tail -n 120 /var/log/install.log 2>/dev/null || true
-
-    echo "Recent startosinstall/osinstallersetupd unified log entries:"
-    /usr/bin/log show \
-        --style syslog \
-        --last 15m \
-        --predicate 'process == "startosinstall" || process == "osinstallersetupd" || eventMessage CONTAINS[c] "OSISClient" || eventMessage CONTAINS[c] "LACredential" || eventMessage CONTAINS[c] "OSInstallerSetup"' \
-        2>/dev/null || true
-
-    echo "If the unified log mentions password rejection or LocalAuthentication failures, verify Jamf parameter 5 and use a volume-owner account password."
-    echo "If it mentions package, personalization, or compatibility failures, rebuild/redownload the Tahoe installer and rerun the policy."
-fi
-
 exit "$RESULT"
