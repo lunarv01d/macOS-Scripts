@@ -14,6 +14,7 @@ TARGET_VERSION="$6"
 TARGET_INSTALLER_NAME="Install macOS Tahoe.app"
 VOLUME_NAME="Macintosh HD"
 LOG="/var/log/lisd-erase-install.log"
+SCRIPT_VERSION="2026-07-08-bootstrap-token-startosinstall"
 
 exec > >(tee -a "$LOG") 2>&1
 
@@ -25,6 +26,7 @@ echo "Param 5 length: ${#5}"
 echo "Param 6: ${TARGET_VERSION:-not set}"
 
 echo "===== LISD Erase Install Started ====="
+echo "Script version: $SCRIPT_VERSION"
 date
 
 if [ -z "$ADMIN_USER" ] || [ -z "$ADMIN_PASS" ]; then
@@ -44,7 +46,12 @@ if [ "$ARCH" != "arm64" ]; then
 fi
 
 echo "Checking Bootstrap Token status..."
-/usr/bin/profiles status -type bootstraptoken || true
+BOOTSTRAP_TOKEN_STATUS=$(/usr/bin/profiles status -type bootstraptoken 2>&1 || true)
+echo "$BOOTSTRAP_TOKEN_STATUS"
+BOOTSTRAP_TOKEN_ESCROWED="false"
+if echo "$BOOTSTRAP_TOKEN_STATUS" | /usr/bin/grep -qi "Bootstrap Token escrowed to server: YES"; then
+    BOOTSTRAP_TOKEN_ESCROWED="true"
+fi
 
 if [ -n "$TARGET_VERSION" ]; then
     echo "Downloading macOS full installer version $TARGET_VERSION..."
