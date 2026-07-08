@@ -7,23 +7,27 @@ Script result: Param 1: /
 Param 2: ATC112-18
 Param 3: localadmin
 Param 4: localadmin
-Param 5 length: 8
+Param 5 length: 9
+Param 6: not set
 ===== LISD Erase Install Started =====
-Wed Jul  8 16:16:01 CDT 2026
+Wed Jul  8 16:49:54 CDT 2026
 Admin user: localadmin
 Volume name: Macintosh HD
 Checking Bootstrap Token status...
 profiles: Bootstrap Token supported on server: YES
 profiles: Bootstrap Token escrowed to server: YES
-Downloading newest macOS full installer...
+No target installer version supplied in Jamf parameter 6.
+Downloading newest available macOS full installer; this policy will only continue if it resolves to Install macOS Tahoe.app.
 Scanning for  installer
 Install finished successfully
-Finding newest installer...
+Finding installer...
 Using installer: /Applications/Install macOS Tahoe.app
 Checking Secure Token status...
-2026-07-08 16:16:07.679 sysadminctl[26193:11615050] Secure token is ENABLED for user localadmin
+2026-07-08 16:50:02.777 sysadminctl[28204:11668177] Secure token is ENABLED for user localadmin
+Validating admin password before startosinstall...
 Starting erase install...
 This Mac will reboot and erase itself.
+startosinstall exited with code: 18
 
 Error running script: return code was 18.
 Submitting log to https://cn366.jamfcloud.com/

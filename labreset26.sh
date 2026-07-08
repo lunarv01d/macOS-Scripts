@@ -99,66 +99,27 @@ fi
 echo "Checking Secure Token status..."
 /usr/sbin/sysadminctl -secureTokenStatus "$ADMIN_USER" 2>&1 || true
 
-if [ "$BOOTSTRAP_TOKEN_ESCROWED" = "true" ]; then
-    echo "Bootstrap Token is escrowed; startosinstall will use MDM authorization instead of stdin credentials."
-else
-    echo "Validating admin password before startosinstall..."
-    if ! /usr/bin/dscl /Local/Default -authonly "$ADMIN_USER" "$ADMIN_PASS"; then
-        echo "ERROR: Password validation failed for $ADMIN_USER."
-        echo "Apple Silicon erase installs require valid credentials for a Secure Token/volume-owner admin."
-        exit 1
-    fi
-
-    USER_GUID=$(/usr/bin/dscl . -read "/Users/$ADMIN_USER" GeneratedUID 2>/dev/null | /usr/bin/awk '{print $2}')
-    if [ -n "$USER_GUID" ]; then
-        echo "Checking APFS volume ownership for $ADMIN_USER ($USER_GUID)..."
-        VOLUME_OWNER_STATUS=$(/usr/sbin/diskutil apfs listUsers / 2>/dev/null | /usr/bin/awk -v guid="$USER_GUID" '
-            $0 ~ guid { in_user=1; owner="" }
-            in_user && /Volume Owner:/ { owner=$0 }
-            in_user && owner != "" { print owner; exit }
-        ')
-
-        if [ -z "$VOLUME_OWNER_STATUS" ]; then
-            echo "WARNING: Could not confirm APFS volume-owner status for $ADMIN_USER."
-            echo "startosinstall on Apple Silicon requires the supplied account to be a volume owner."
-        elif echo "$VOLUME_OWNER_STATUS" | /usr/bin/grep -qi "Yes"; then
-            echo "APFS volume-owner status: $VOLUME_OWNER_STATUS"
-        else
-            echo "ERROR: $ADMIN_USER is not an APFS volume owner: $VOLUME_OWNER_STATUS"
-            echo "Use the password for a volume-owner account, or issue the Jamf MDM EraseDevice command instead of startosinstall."
-            exit 1
-        fi
-    else
-        echo "WARNING: Could not read GeneratedUID for $ADMIN_USER; unable to verify APFS volume-owner status."
-    fi
-
+echo "Validating admin password before startosinstall..."
+if ! /usr/bin/dscl /Local/Default -authonly "$ADMIN_USER" "$ADMIN_PASS"; then
+    echo "ERROR: Password validation failed for $ADMIN_USER."
+    echo "Apple Silicon erase installs require valid credentials for a Secure Token/volume-owner admin."
+    exit 1
 fi
 
 echo "Starting erase install..."
 echo "This Mac will reboot and erase itself."
 
 set +e
-if [ "$BOOTSTRAP_TOKEN_ESCROWED" = "true" ]; then
-    "$STARTOSINSTALL" \
-        --eraseinstall \
-        --newvolumename "$VOLUME_NAME" \
-        --agreetolicense \
-        --forcequitapps \
-        --allowremoval \
-        --nointeraction
-    RESULT=$?
-else
-    printf '%s\n' "$ADMIN_PASS" | "$STARTOSINSTALL" \
-        --eraseinstall \
-        --newvolumename "$VOLUME_NAME" \
-        --agreetolicense \
-        --forcequitapps \
-        --allowremoval \
-        --nointeraction \
-        --user "$ADMIN_USER" \
-        --stdinpass
-    RESULT=$?
-fi
+printf '%s\n' "$ADMIN_PASS" | "$STARTOSINSTALL" \
+    --eraseinstall \
+    --newvolumename "$VOLUME_NAME" \
+    --agreetolicense \
+    --forcequitapps \
+    --allowremoval \
+    --nointeraction \
+    --user "$ADMIN_USER" \
+    --stdinpass
+RESULT=$?
 set -e
 
 echo "startosinstall exited with code: $RESULT"
