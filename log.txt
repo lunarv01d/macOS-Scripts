@@ -1,0 +1,29 @@
+sh-3.2# jamf policy --event labreset26
+Checking for policies triggered by "labreset26" for user "localadmin"...
+Executing Policy Lab Reset 2026
+Running script Lab Reset 2026...
+Script exit code: 18
+Script result: Param 1: /
+Param 2: ATC112-18
+Param 3: localadmin
+Param 4: localadmin
+Param 5 length: 8
+===== LISD Erase Install Started =====
+Wed Jul  8 16:16:01 CDT 2026
+Admin user: localadmin
+Volume name: Macintosh HD
+Checking Bootstrap Token status...
+profiles: Bootstrap Token supported on server: YES
+profiles: Bootstrap Token escrowed to server: YES
+Downloading newest macOS full installer...
+Scanning for  installer
+Install finished successfully
+Finding newest installer...
+Using installer: /Applications/Install macOS Tahoe.app
+Checking Secure Token status...
+2026-07-08 16:16:07.679 sysadminctl[26193:11615050] Secure token is ENABLED for user localadmin
+Starting erase install...
+This Mac will reboot and erase itself.
+
+Error running script: return code was 18.
+Submitting log to https://cn366.jamfcloud.com/
