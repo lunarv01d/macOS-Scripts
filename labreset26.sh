@@ -1,12 +1,17 @@
 #!/bin/bash
 
-# WARNING: Erases the Mac and installs the newest available macOS full installer.
+# WARNING: Erases the Mac and installs the selected macOS full installer.
 # Jamf Parameters:
+#   4: Secure Token admin username
+#   5: Secure Token admin password
+#   6: Optional full macOS installer version to download (for example: 26.0)
 
 set -e
 
 ADMIN_USER="$4"
 ADMIN_PASS="$5"
+TARGET_VERSION="$6"
+TARGET_INSTALLER_NAME="Install macOS Tahoe.app"
 VOLUME_NAME="Macintosh HD"
 LOG="/var/log/lisd-erase-install.log"
 
@@ -17,14 +22,15 @@ echo "Param 2: $2"
 echo "Param 3: $3"
 echo "Param 4: $4"
 echo "Param 5 length: ${#5}"
+echo "Param 6: ${TARGET_VERSION:-not set}"
 
 echo "===== LISD Erase Install Started ====="
 date
 
 if [ -z "$ADMIN_USER" ] || [ -z "$ADMIN_PASS" ]; then
     echo "ERROR: Missing Jamf parameters."
-    echo "Parameter 4."
-    echo "Parameter 5."
+    echo "Parameter 4: Secure Token admin username."
+    echo "Parameter 5: Secure Token admin password."
     exit 1
 fi
 
@@ -40,14 +46,32 @@ fi
 echo "Checking Bootstrap Token status..."
 /usr/bin/profiles status -type bootstraptoken || true
 
-echo "Downloading newest macOS full installer..."
-/usr/sbin/softwareupdate --fetch-full-installer
+if [ -n "$TARGET_VERSION" ]; then
+    echo "Downloading macOS full installer version $TARGET_VERSION..."
+    /usr/sbin/softwareupdate --fetch-full-installer --full-installer-version "$TARGET_VERSION"
+else
+    echo "No target installer version supplied in Jamf parameter 6."
+    echo "Downloading newest available macOS full installer; this policy will only continue if it resolves to $TARGET_INSTALLER_NAME."
+    /usr/sbin/softwareupdate --fetch-full-installer
+fi
 
-echo "Finding newest installer..."
-INSTALLER=$(/bin/ls -dt /Applications/Install\ macOS*.app 2>/dev/null | /usr/bin/head -n 1)
+echo "Finding installer..."
+if [ -d "/Applications/$TARGET_INSTALLER_NAME" ]; then
+    INSTALLER="/Applications/$TARGET_INSTALLER_NAME"
+else
+    INSTALLER=$(/bin/ls -dt /Applications/Install\ macOS*.app 2>/dev/null | /usr/bin/head -n 1 || true)
+fi
 
 if [ -z "$INSTALLER" ]; then
     echo "ERROR: No macOS installer found in /Applications."
+    echo "Cache $TARGET_INSTALLER_NAME first, or set Jamf parameter 6 to a specific Tahoe full installer version."
+    exit 1
+fi
+
+INSTALLER_BASENAME=$(/usr/bin/basename "$INSTALLER")
+if [ "$INSTALLER_BASENAME" != "$TARGET_INSTALLER_NAME" ]; then
+    echo "ERROR: Found $INSTALLER_BASENAME, but this lab reset is intended to install $TARGET_INSTALLER_NAME."
+    echo "Set Jamf parameter 6 to a Tahoe version or cache /Applications/$TARGET_INSTALLER_NAME."
     exit 1
 fi
 
@@ -68,19 +92,28 @@ fi
 echo "Checking Secure Token status..."
 /usr/sbin/sysadminctl -secureTokenStatus "$ADMIN_USER" 2>&1 || true
 
+echo "Validating admin password before startosinstall..."
+if ! /usr/bin/dscl /Local/Default -authonly "$ADMIN_USER" "$ADMIN_PASS"; then
+    echo "ERROR: Password validation failed for $ADMIN_USER."
+    echo "Apple Silicon erase installs require valid credentials for a Secure Token/volume-owner admin."
+    exit 1
+fi
+
 echo "Starting erase install..."
 echo "This Mac will reboot and erase itself."
 
-echo "$ADMIN_PASS" | "$STARTOSINSTALL" \
+set +e
+printf '%s\n' "$ADMIN_PASS" | "$STARTOSINSTALL" \
     --eraseinstall \
     --newvolumename "$VOLUME_NAME" \
     --agreetolicense \
     --forcequitapps \
+    --allowremoval \
     --nointeraction \
     --user "$ADMIN_USER" \
     --stdinpass
-
 RESULT=$?
-echo "startosinstall exited with code: $RESULT"
+set -e
 
+echo "startosinstall exited with code: $RESULT"
 exit "$RESULT"
